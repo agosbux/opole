@@ -1,0 +1,51 @@
+{
+  "project_info": {
+    "project_number": "643602636807",
+    "project_id": "opole-650ad",
+    "storage_bucket": "opole-650ad.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:643602636807:android:a726de32a041b088df8aa2",
+        "android_client_info": {
+          "package_name": "com.opole.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "643602636807-d3gr3t6pfv8pme30h2t6k47omi0lgtgm.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.opole.app",
+            "certificate_hash": "74ec859c05cfb293c809a05d973d225ff7e45865"
+          }
+        },
+        {
+          "client_id": "643602636807-gt6rcbvt73t7ro3dtrcmdeg119df8it0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.opole.app",
+            "certificate_hash": "5f3874051ca24dc879b9f344049b6118c5499965"
+          }
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB4qu5cM3wBuBlLUiepPa_hrHIzVFvwyGo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "643602636807-ptlcj6gnjo8pa8ntteue9pj7jqt3kdro.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

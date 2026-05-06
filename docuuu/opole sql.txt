@@ -1,0 +1,1192 @@
+¡Excelente idea! Vamos paso a paso, comentando TODO para que entiendas QUÉ hace cada cosa y POR QUÉ es importante.
+
+Empecemos desde cero con el SQL comentado:
+
+sql
+-- =====================================================
+-- SISTEMA COMPLETO OPOLE - VERSIÓN FINAL UNIFICADA
+-- =====================================================
+-- Esta es la BASE DE DATOS completa de Opole
+-- Incluye: Feed de reels + Creación + Perfil + Niveles
+-- 
+-- ¿Qué es Opole? App de reels para compra/venta en Argentina
+-- =====================================================
+
+-- =====================================================
+-- PARTE 1: TABLA USERS (los usuarios de la app)
+-- =====================================================
+CREATE TABLE users (
+    -- 🆔 IDENTIFICACIÓN BÁSICA (siempre necesaria)
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username TEXT UNIQUE NOT NULL,      -- @usuario (único)
+    email TEXT UNIQUE NOT NULL,         -- email (único)
+    photo_url TEXT,                     -- foto de perfil
+    
+    -- ⭐ NIVEL Y REPUTACIÓN (para el feed y confianza)
+    level INT DEFAULT 1,                 -- del 1 al 8 (más nivel = más beneficios)
+    reputation INT DEFAULT 0,            -- qué tan confiable es (sube con ventas)
+    
+    -- ⚡ PUNTOS (separados por tipo para no confundirlos)
+    puntos_boost INT DEFAULT 0,          -- para comprar boosts (ver anuncios, invitar)
+    puntos_compromiso INT DEFAULT 0,     -- para subir de nivel (interacciones)
+    -- ¿Diferencia? Un usuario puede tener muchos puntos_boost (para publicar)
+    -- pero pocos puntos_compromiso (si no interactúa)
+    
+    -- ✅ VERIFICACIONES (dan bonus y confianza)
+    email_verificado BOOLEAN DEFAULT FALSE,        -- confirmó su email
+    whatsapp_verificado BOOLEAN DEFAULT FALSE,     -- confirmó WhatsApp
+    facebook_verificado_3 BOOLEAN DEFAULT FALSE,   -- tiene FB con +3 años
+    verified BOOLEAN DEFAULT FALSE,                 -- verificación externa (la más importante)
+    -- ¿Por qué tantas? Cada verificación suma puntos y bonus
+    
+    -- 📍 UBICACIÓN (crítico para el feed geográfico)
+    province TEXT,                         -- provincia (ej: "Buenos Aires")
+    locality TEXT,                          -- localidad (ej: "La Plata")
+    -- Sin ubicación, no puede publicar reels
+    
+    -- 👤 DATOS PERSONALES (para contacto)
+    genero TEXT,
+    telefono TEXT,
+    telefono_verificado BOOLEAN DEFAULT FALSE,
+    
+    -- ⚙️ PREFERENCIAS (para no repetir datos al publicar)
+    default_shipping TEXT[] DEFAULT '{}',   -- envíos preferidos
+    default_payment TEXT[] DEFAULT '{}',    -- pagos preferidos
+    datos_sensibles_on BOOLEAN DEFAULT TRUE, -- switch para compartir info
+    
+    -- 📊 ESTADÍSTICAS DE MATCH (para el badge ⏱️ de velocidad)
+    total_selecciones INT DEFAULT 0,         -- total de veces que lo eligieron
+    respuestas_rapidas INT DEFAULT 0,        -- respondió en < 1h
+    respuestas_tardias INT DEFAULT 0,        -- respondió entre 1-12h
+    sin_respuesta INT DEFAULT 0,              -- no respondió (penalización)
+    -- Con estos datos mostramos: "Rápida", "Tardía" o "No Responde"
+    
+    -- 📊 CONTROL DE PUBLICACIONES (anti-spam)
+    reels_semana INT DEFAULT 0,              -- cuántos publicó esta semana
+    reels_mes INT DEFAULT 0,                  -- cuántos publicó este mes
+    reels_activos INT DEFAULT 0,               -- cuántos tiene activos ahora
+    semana_inicio DATE,                        -- cuándo empezó la semana
+    mes_inicio DATE,                           -- cuándo empezó el mes
+    total_publicaciones INT DEFAULT 0,         -- total histórico
+    
+    -- 📅 DÍAS ACTIVOS (para subir de nivel)
+    dias_activos INT DEFAULT 0,                -- días que usó la app
+    ultimo_acceso DATE,                        -- última vez que entró
+    dias_conteo_maximo BOOLEAN DEFAULT FALSE,  -- ya llegó a 30 días?
+    -- Los primeros 30 días dan +5 puntos_compromiso por día
+    
+    -- ⏰ CONTROL
+    created_at TIMESTAMP DEFAULT NOW()         -- cuándo se registró
+);
+
+-- =====================================================
+-- PARTE 2: TABLA REELS (los videos/publicaciones)
+-- =====================================================
+CREATE TABLE reels (
+    -- 🆔 IDENTIFICACIÓN
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,  -- quién publicó
+    
+    -- 🎥 CONTENIDO MULTIMEDIA
+    video_url TEXT NOT NULL,                    -- URL del video en Cloudinary
+    thumbnail_url TEXT NOT NULL,                 -- imagen de portada (carga instantánea)
+    -- El thumbnail es CLAVE: se ve al instante mientras carga el video
+    
+    -- 📝 INFORMACIÓN DEL PRODUCTO
+    title TEXT NOT NULL,                         -- título (5-100 caracteres)
+    description TEXT,                             -- descripción (10-500)
+    price FLOAT NOT NULL,                         -- precio en ARS
+    condition TEXT CHECK (condition IN ('NEW', 'USED')),  -- nuevo/usado
+    categories TEXT[],                            -- hasta 4 categorías
+    
+    -- 📍 UBICACIÓN (se hereda del perfil automáticamente)
+    province TEXT NOT NULL,
+    locality TEXT NOT NULL,
+    
+    -- 🚚 LOGÍSTICA (informativa, Opole no intermedia)
+    shipping_methods TEXT[] DEFAULT '{}',        -- ej: ["Retiro", "Correo"]
+    payment_methods TEXT[] DEFAULT '{}',         -- ej: ["Efectivo", "Transferencia"]
+    
+    -- 📊 MÉTRICAS
+    like_count INT DEFAULT 0,                     -- ❤️ engagement (para ranking)
+    lo_quiero_count INT DEFAULT 0,                 -- 🛒 intención REAL de compra
+    share_count INT DEFAULT 0,                     -- compartidos
+    view_count INT DEFAULT 0,                       -- vistas
+    
+    -- 🚀 RANKING Y BOOST (para ordenar el feed)
+    ranking_score FLOAT DEFAULT 0,                  -- puntaje calculado
+    boost_type TEXT CHECK (boost_type IN ('NORMAL', 'EXPONENCIAL', NULL)),  -- tipo de boost
+    boost_expires_at TIMESTAMP,                      -- hasta cuándo tiene boost
+    
+    -- ⏰ CONTROL
+    duration INT DEFAULT 30,                         -- duración en segundos
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'shadow_banned', 'disabled', 'completed')),
+    -- active: visible
+    -- shadow_banned: solo lo ve el dueño
+    -- disabled: desactivado por admin
+    -- completed: vendido (no aparece en feed)
+    
+    created_at TIMESTAMP DEFAULT NOW(),
+    
+    -- 🔒 SEGURIDAD: el precio nunca puede ser 0 ni absurdo
+    CONSTRAINT price_check CHECK (price > 0 AND price < 100000000)
+);
+
+-- =====================================================
+-- PARTE 3: TABLAS DE INTERACCIÓN (likes, lo quiero, etc)
+-- =====================================================
+
+-- ❤️ LIKES (solo para engagement del algoritmo)
+CREATE TABLE likes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reel_id UUID REFERENCES reels(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(reel_id, user_id)  -- 1 like por usuario por reel
+);
+-- ¿Para qué sirve? Alimenta el ranking (peso 1)
+-- NO genera matches, NO notifica al vendedor
+
+-- 🛒 LO QUIERO (intención REAL de compra - CORAZÓN DEL SISTEMA)
+CREATE TABLE lo_quiero (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reel_id UUID REFERENCES reels(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT DEFAULT 'activo' CHECK (status IN (
+        'activo',        -- esperando ser seleccionado
+        'seleccionado',  -- el vendedor ya lo eligió
+        'completado',    -- match exitoso
+        'cancelado'      -- se canceló
+    )),
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(reel_id, user_id)  -- 1 intención por usuario por reel
+);
+-- DIFERENCIA CRÍTICA con likes:
+-- - Like: ❤️ engagement (cambia ranking)
+-- - Lo Quiero: 🛒 QUIERO COMPRAR (inicia el match)
+-- Este es el PUNTO DE PARTIDA de todo el sistema de compra-venta
+
+-- =====================================================
+-- PARTE 4: SISTEMA DE MATCH (el corazón)
+-- =====================================================
+
+-- 🤝 MATCHES (cuando el vendedor selecciona un comprador)
+CREATE TABLE matches (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reel_id UUID REFERENCES reels(id) ON DELETE CASCADE,
+    vendedor_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    comprador_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    
+    -- Estado del match
+    status TEXT NOT NULL CHECK (status IN (
+        'seleccionado',  -- vendedor eligió, esperando respuesta
+        'aceptado',      -- comprador aceptó (match completado)
+        'rechazado',     -- comprador rechazó
+        'expirado'       -- comprador no respondió en 12hs
+    )),
+    
+    -- ⏰ Timers (crítico para la UX)
+    selected_at TIMESTAMP DEFAULT NOW(),           -- cuándo lo seleccionaron
+    expires_at TIMESTAMP,                          -- selected_at + 12 horas
+    responded_at TIMESTAMP,                         -- cuándo respondió
+    
+    -- 💰 Puntos (se asignan al completar)
+    puntos_vendedor INT DEFAULT 0,
+    puntos_comprador INT DEFAULT 0,
+    
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- =====================================================
+-- PARTE 5: NOTIFICACIONES (solo para intenciones reales)
+-- =====================================================
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK (type IN (
+        'nuevo_lo_quiero',           -- a alguien le interesa tu producto
+        'te_seleccionaron',           -- te eligieron para comprar
+        'acepto_seleccion',            -- aceptaron tu selección
+        'rechazo_seleccion',           -- rechazaron tu selección
+        'sin_respuesta',               -- no respondiste (perdiste puntos)
+        'nuevo_interesado_disponible'  -- podés elegir otro comprador
+    )),
+    data JSONB,                         -- datos extra {reel_id, usuario, etc}
+    read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+-- IMPORTANTE: SOLO notificaciones de LO QUIERO
+-- Los LIKES no notifican NUNCA
+
+-- =====================================================
+-- PARTE 6: SEGURIDAD (denuncias y palabras prohibidas)
+-- =====================================================
+
+-- 🚩 DENUNCIAS (sistema anti-avivada)
+CREATE TABLE denuncias (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reel_id UUID REFERENCES reels(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    tipo TEXT NOT NULL CHECK (tipo IN ('estafa', 'inapropiado', 'prohibido', 'spam', 'otro')),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 📝 PALABRAS PROHIBIDAS (lista negra simple)
+CREATE TABLE forbidden_keywords (
+    id SERIAL PRIMARY KEY,
+    keyword TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- =====================================================
+-- PARTE 7: LÍMITES POR NIVEL (configurables)
+-- =====================================================
+CREATE TABLE user_limits (
+    nivel INT PRIMARY KEY,
+    reels_por_semana INT NOT NULL,      -- cuántos puede publicar por semana
+    reels_por_mes INT NOT NULL,          -- cuántos por mes
+    max_activos INT NOT NULL,            -- cuántos puede tener activos
+    lo_quiero_por_dia INT NOT NULL,      -- cuántos LO QUIERO puede dar por día
+    verified_bonus_semanal INT DEFAULT 5,     -- bonus si está verificado
+    verified_bonus_mensual INT DEFAULT 30,
+    verified_bonus_activos INT DEFAULT 30
+);
+
+-- Insertar límites para cada nivel
+INSERT INTO user_limits VALUES
+(1, 0, 0, 0, 0, 5, 30, 30),   -- Nivel 1: no puede publicar
+(2, 2, 8, 8, 5, 5, 30, 30),    -- Nivel 2: 2 por semana, 8 por mes
+(3, 2, 8, 8, 5, 5, 30, 30),
+(4, 2, 8, 8, 5, 5, 30, 30),
+(5, 2, 8, 8, 10, 5, 30, 30),
+(6, 3, 12, 12, 15, 5, 30, 30),
+(7, 4, 16, 16, 20, 5, 30, 30),
+(8, 5, 20, 20, 30, 5, 30, 30)
+ON CONFLICT (nivel) DO NOTHING;
+
+-- =====================================================
+-- PARTE 8: ÍNDICES (para que todo sea RÁPIDO)
+-- =====================================================
+-- Los índices son como el índice de un libro: aceleran las búsquedas
+
+-- Índices para reels
+CREATE INDEX idx_reels_ranking ON reels(ranking_score DESC);
+CREATE INDEX idx_reels_location ON reels(province, locality);
+CREATE INDEX idx_reels_status ON reels(status);
+CREATE INDEX idx_reels_boost ON reels(boost_type, boost_expires_at);
+CREATE INDEX idx_reels_user ON reels(user_id);
+CREATE INDEX idx_reels_created ON reels(created_at DESC);
+
+-- Índices para interacciones
+CREATE INDEX idx_likes_reel ON likes(reel_id);
+CREATE INDEX idx_likes_user ON likes(user_id);
+CREATE INDEX idx_lo_quiero_reel ON lo_quiero(reel_id);
+CREATE INDEX idx_lo_quiero_user ON lo_quiero(user_id);
+CREATE INDEX idx_denuncias_reel ON denuncias(reel_id);
+CREATE INDEX idx_denuncias_user ON denuncias(user_id);
+
+-- Índices para matches
+CREATE INDEX idx_matches_vendedor ON matches(vendedor_id, status);
+CREATE INDEX idx_matches_comprador ON matches(comprador_id, status);
+CREATE INDEX idx_matches_reel ON matches(reel_id);
+CREATE INDEX idx_matches_expires ON matches(expires_at) WHERE status = 'seleccionado';
+
+-- Índices para notificaciones
+CREATE INDEX idx_notifications_user ON notifications(user_id, read, created_at DESC);
+
+-- Índice para palabras prohibidas
+CREATE INDEX idx_forbidden_keywords ON forbidden_keywords(keyword);
+📝 ¿HASTA ACÁ SE ENTIENDE?
+Te explico lo que acabamos de crear:
+
+Tabla	¿Qué guarda?	¿Para qué sirve?
+users	Datos de cada persona	Perfil, nivel, puntos, ubicación
+reels	Los videos/publicaciones	El contenido del feed
+likes	"Me gusta"	Solo para el ranking
+lo_quiero	Intención de compra	Para iniciar el match
+matches	Selecciones vendedor-comprador	El corazón de la compra-venta
+notifications	Alertas	Solo para LO QUIERO
+denuncias	Reportes	Moderación
+user_limits	Límites por nivel	Control anti-spam
+¿Seguimos con las FUNCIONES (la parte más compleja) o hasta acá vamos bien?
+
+venga vamos por todo
+¡Perfecto! Vamos con las FUNCIONES (la lógica de negocio). Esto es lo que hace que todo cobre vida:
+
+sql
+-- =====================================================
+-- PARTE 9: FUNCIONES DE AUTENTICACIÓN Y CONTROL DIARIO
+-- =====================================================
+
+-- 📅 REGISTRAR ACCESO DIARIO
+-- ¿Qué hace? Cuando el usuario abre la app, suma un día activo
+-- ¿Por qué? Para subir de nivel necesitás días activos
+CREATE OR REPLACE FUNCTION registrar_acceso_diario(p_user_id UUID)
+RETURNS void AS $$
+DECLARE
+    v_ultimo_acceso DATE;
+    v_dias_activos INT;
+    v_dias_conteo_maximo BOOLEAN;
+BEGIN
+    -- Traemos los datos actuales del usuario
+    SELECT ultimo_acceso, dias_activos, dias_conteo_maximo
+    INTO v_ultimo_acceso, v_dias_activos, v_dias_conteo_maximo
+    FROM users WHERE id = p_user_id;
+
+    -- Si es la primera vez hoy que entra (o nunca entró)
+    IF v_ultimo_acceso IS NULL OR v_ultimo_acceso < CURRENT_DATE THEN
+        
+        -- Si todavía no llegó a los 30 días máximos
+        IF NOT COALESCE(v_dias_conteo_maximo, FALSE) THEN
+            -- +5 puntos_compromiso por día activo
+            -- +1 día a su contador
+            UPDATE users SET
+                puntos_compromiso = puntos_compromiso + 5,
+                dias_activos = COALESCE(dias_activos, 0) + 1,
+                ultimo_acceso = CURRENT_DATE
+            WHERE id = p_user_id;
+            
+            -- Si llegó a 30 días, marcamos que ya no suma más
+            IF COALESCE(v_dias_activos, 0) + 1 >= 30 THEN
+                UPDATE users SET dias_conteo_maximo = TRUE WHERE id = p_user_id;
+            END IF;
+        ELSE
+            -- Ya llegó al máximo, solo actualizamos fecha
+            UPDATE users SET ultimo_acceso = CURRENT_DATE WHERE id = p_user_id;
+        END IF;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =====================================================
+-- PARTE 10: FUNCIONES DE VERIFICACIÓN DE LÍMITES
+-- =====================================================
+
+-- 🛒 VERIFICAR LÍMITE DE LO QUIERO POR DÍA
+-- ¿Qué hace? Controla cuántos LO QUIERO puede dar un usuario hoy
+-- ¿Por qué? Para evitar spam de intenciones de compra
+CREATE OR REPLACE FUNCTION verificar_limite_lo_quiero(p_user_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_lo_quiero_hoy INT;
+    v_nivel INT;
+    v_limite INT;
+BEGIN
+    -- Contamos cuántos LO QUIERO dio hoy este usuario
+    SELECT COUNT(*) INTO v_lo_quiero_hoy
+    FROM lo_quiero 
+    WHERE user_id = p_user_id 
+    AND created_at::DATE = CURRENT_DATE;
+    
+    -- Obtenemos su nivel
+    SELECT level INTO v_nivel FROM users WHERE id = p_user_id;
+    
+    -- Obtenemos el límite según su nivel
+    SELECT lo_quiero_por_dia INTO v_limite
+    FROM user_limits WHERE nivel = v_nivel;
+    
+    -- Puede dar LO QUIERO si no llegó al límite
+    RETURN COALESCE(v_lo_quiero_hoy, 0) < COALESCE(v_limite, 0);
+END;
+$$ LANGUAGE plpgsql;
+
+-- 📊 VERIFICAR LÍMITE DE PUBLICACIÓN
+-- ¿Qué hace? Controla si el usuario puede publicar otro reel
+-- ¿Por qué? Para respetar los límites semanales/mensuales por nivel
+CREATE OR REPLACE FUNCTION puede_publicar_reel(p_user_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_nivel INT;
+    v_verified BOOLEAN;
+    v_reels_semana INT;
+    v_reels_mes INT;
+    v_reels_activos INT;
+    v_limite_semana INT;
+    v_limite_mes INT;
+    v_limite_activos INT;
+    v_bonus_semana INT;
+    v_bonus_mes INT;
+    v_bonus_activos INT;
+    v_semana_inicio DATE;
+    v_mes_inicio DATE;
+    v_hoy DATE := CURRENT_DATE;
+BEGIN
+    -- 1️⃣ OBTENER DATOS DEL USUARIO
+    SELECT 
+        level, verified,
+        reels_semana, reels_mes, reels_activos,
+        semana_inicio, mes_inicio
+    INTO v_nivel, v_verified, v_reels_semana, v_reels_mes, v_reels_activos,
+         v_semana_inicio, v_mes_inicio
+    FROM users WHERE id = p_user_id;
+    
+    -- Valores por defecto (por si es null)
+    v_nivel := COALESCE(v_nivel, 1);
+    v_verified := COALESCE(v_verified, FALSE);
+    v_reels_semana := COALESCE(v_reels_semana, 0);
+    v_reels_mes := COALESCE(v_reels_mes, 0);
+    v_reels_activos := COALESCE(v_reels_activos, 0);
+    
+    -- 2️⃣ OBTENER LÍMITES SEGÚN SU NIVEL
+    SELECT 
+        reels_por_semana, reels_por_mes, max_activos,
+        verified_bonus_semanal, verified_bonus_mensual, verified_bonus_activos
+    INTO v_limite_semana, v_limite_mes, v_limite_activos,
+         v_bonus_semana, v_bonus_mes, v_bonus_activos
+    FROM user_limits WHERE nivel = v_nivel;
+    
+    -- Valores por defecto por si no encuentra
+    v_limite_semana := COALESCE(v_limite_semana, 0);
+    v_limite_mes := COALESCE(v_limite_mes, 0);
+    v_limite_activos := COALESCE(v_limite_activos, 0);
+    v_bonus_semana := COALESCE(v_bonus_semana, 5);
+    v_bonus_mes := COALESCE(v_bonus_mes, 30);
+    v_bonus_activos := COALESCE(v_bonus_activos, 30);
+    
+    -- 3️⃣ APLICAR BONUS POR VERIFICACIÓN
+    IF v_verified THEN
+        v_limite_semana := v_limite_semana + v_bonus_semana;
+        v_limite_mes := v_limite_mes + v_bonus_mes;
+        v_limite_activos := v_limite_activos + v_bonus_activos;
+    END IF;
+    
+    -- 4️⃣ RESETEAR CONTADORES SI PASÓ EL TIEMPO
+    -- ¿Pasó una semana? Reseteamos contador semanal
+    IF v_semana_inicio IS NULL OR v_semana_inicio < v_hoy - INTERVAL '7 days' THEN
+        UPDATE users SET 
+            reels_semana = 0,
+            semana_inicio = v_hoy
+        WHERE id = p_user_id;
+        v_reels_semana := 0;
+    END IF;
+    
+    -- ¿Pasó un mes? Reseteamos contador mensual
+    IF v_mes_inicio IS NULL OR v_mes_inicio < v_hoy - INTERVAL '30 days' THEN
+        UPDATE users SET 
+            reels_mes = 0,
+            mes_inicio = v_hoy
+        WHERE id = p_user_id;
+        v_reels_mes := 0;
+    END IF;
+    
+    -- 5️⃣ VERIFICAR QUE NO EXCEDA NINGÚN LÍMITE
+    RETURN (v_reels_semana < v_limite_semana)
+        AND (v_reels_mes < v_limite_mes)
+        AND (v_reels_activos < v_limite_activos);
+END;
+$$ LANGUAGE plpgsql;
+⏸️ ¿Vamos bien?
+Hasta ahora tenemos:
+
+Función	¿Qué hace?	¿Cuándo se usa?
+registrar_acceso_diario	Suma +1 día activo y +5 puntos	Cada vez que abre la app
+verificar_limite_lo_quiero	Controla cuántos LO QUIERO puede dar hoy	Antes de insertar un LO QUIERO
+puede_publicar_reel	Verifica límites semanales/mensuales	Antes de publicar un reel
+¿Entendés la lógica hasta acá? Si querés, sigo con las funciones más pesadas:
+
+publicar_reel_con_boost (la más importante)
+
+seleccionar_comprador (match)
+
+responder_match (corazón del sistema)
+
+calcular_nivel_usuario (subir de nivel)
+
+claro que si vamos contodo , quiero todo
+¡Vamos con TODO! Las funciones más importantes del sistema:
+
+sql
+-- =====================================================
+-- PARTE 11: FUNCIÓN DE PUBLICACIÓN (LA MÁS IMPORTANTE)
+-- =====================================================
+-- 🚀 PUBLICAR REEL CON BOOST
+-- ¿Qué hace? Crea un nuevo reel y actualiza todos los contadores
+-- ¿Por qué es crítica? Porque:
+--   1. Verifica límites de publicación
+--   2. Descuenta puntos de boost si corresponde
+--   3. Hereda ubicación del perfil automáticamente
+--   4. Actualiza contadores semanales/mensuales
+--   5. Retorna el ID para navegación instantánea
+CREATE OR REPLACE FUNCTION publicar_reel_con_boost(
+    p_user_id UUID,
+    p_video_url TEXT,
+    p_thumbnail_url TEXT,
+    p_title TEXT,
+    p_description TEXT,
+    p_price FLOAT,
+    p_condition TEXT,
+    p_categories TEXT[],
+    p_shipping TEXT[],
+    p_payment TEXT[],
+    p_duration INT,
+    p_puntos_costo INT
+) RETURNS UUID AS $$
+DECLARE
+    v_puntos_disponibles INT;
+    v_provincia TEXT;
+    v_localidad TEXT;
+    v_reel_id UUID;
+    v_puede_publicar BOOLEAN;
+    v_hoy DATE := CURRENT_DATE;
+BEGIN
+    -- =========================================
+    -- PASO 1: VERIFICAR LÍMITES DE PUBLICACIÓN
+    -- =========================================
+    -- ¿Puede publicar según su nivel?
+    SELECT puede_publicar_reel(p_user_id) INTO v_puede_publicar;
+    IF NOT v_puede_publicar THEN
+        RAISE EXCEPTION 'Has alcanzado el límite de publicaciones para este período';
+    END IF;
+    
+    -- =========================================
+    -- PASO 2: OBTENER DATOS DEL PERFIL
+    -- =========================================
+    -- Traemos puntos, provincia y localidad del usuario
+    SELECT puntos_boost, province, locality
+    INTO v_puntos_disponibles, v_provincia, v_localidad
+    FROM users WHERE id = p_user_id;
+    
+    -- =========================================
+    -- PASO 3: VALIDACIONES
+    -- =========================================
+    -- ¿Tiene suficientes puntos para el boost?
+    IF v_puntos_disponibles < p_puntos_costo THEN
+        RAISE EXCEPTION 'Saldo de puntos insuficiente. Necesitás % puntos', p_puntos_costo;
+    END IF;
+    
+    -- ¿Tiene ubicación configurada? (si no, no puede publicar)
+    IF v_provincia IS NULL OR v_localidad IS NULL THEN
+        RAISE EXCEPTION 'Debés configurar provincia y localidad en tu perfil antes de publicar';
+    END IF;
+    
+    -- ¿El precio es válido? (entre $1 y $99.999.999)
+    IF p_price <= 0 OR p_price >= 100000000 THEN
+        RAISE EXCEPTION 'Precio inválido. Debe ser entre $1 y $99.999.999';
+    END IF;
+    
+    -- =========================================
+    -- PASO 4: DESCONTAR PUNTOS (si usó boost)
+    -- =========================================
+    IF p_puntos_costo > 0 THEN
+        UPDATE users SET 
+            puntos_boost = puntos_boost - p_puntos_costo 
+        WHERE id = p_user_id;
+    END IF;
+    
+    -- =========================================
+    -- PASO 5: CREAR EL REEL
+    -- =========================================
+    INSERT INTO reels (
+        user_id, video_url, thumbnail_url, title, description, price,
+        condition, categories, province, locality, shipping_methods,
+        payment_methods, duration, status, created_at
+    ) VALUES (
+        p_user_id, p_video_url, p_thumbnail_url, p_title, p_description, p_price,
+        p_condition, p_categories, v_provincia, v_localidad, p_shipping,
+        p_payment, p_duration, 'active', NOW()
+    ) RETURNING id INTO v_reel_id;
+    
+    -- =========================================
+    -- PASO 6: ACTUALIZAR CONTADORES DEL USUARIO
+    -- =========================================
+    UPDATE users SET
+        total_publicaciones = COALESCE(total_publicaciones, 0) + 1,
+        reels_semana = COALESCE(reels_semana, 0) + 1,
+        reels_mes = COALESCE(reels_mes, 0) + 1,
+        reels_activos = COALESCE(reels_activos, 0) + 1,
+        puntos_compromiso = COALESCE(puntos_compromiso, 0) + 10, -- +10 por publicar
+        semana_inicio = COALESCE(semana_inicio, v_hoy),
+        mes_inicio = COALESCE(mes_inicio, v_hoy)
+    WHERE id = p_user_id;
+    
+    -- =========================================
+    -- PASO 7: RECALCULAR NIVEL (por si sube)
+    -- =========================================
+    PERFORM calcular_nivel_usuario(p_user_id);
+    
+    -- =========================================
+    -- PASO 8: RETORNAR ID (¡NAVEGACIÓN INSTANTÁNEA!)
+    -- =========================================
+    RETURN v_reel_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =====================================================
+-- PARTE 12: FUNCIONES DE MATCH (SISTEMA DE COMPRA-VENTA)
+-- =====================================================
+
+-- 🤝 SELECCIONAR COMPRADOR (EL VENDEDOR ELIGE)
+-- ¿Qué hace? El vendedor elige a UN comprador entre todos los interesados
+-- ¿Qué valida?
+--   1. Que el reel sea del vendedor
+--   2. Que no haya otro match activo
+--   3. Que el comprador realmente haya dado LO QUIERO
+CREATE OR REPLACE FUNCTION seleccionar_comprador(
+    p_reel_id UUID,
+    p_vendedor_id UUID,
+    p_comprador_id UUID
+) RETURNS UUID AS $$
+DECLARE
+    v_match_id UUID;
+    v_reel_user_id UUID;
+BEGIN
+    -- =========================================
+    -- PASO 1: VERIFICAR PROPIEDAD DEL REEL
+    -- =========================================
+    SELECT user_id INTO v_reel_user_id FROM reels WHERE id = p_reel_id;
+    IF v_reel_user_id != p_vendedor_id THEN
+        RAISE EXCEPTION 'No podés seleccionar compradores para un reel que no es tuyo';
+    END IF;
+    
+    -- =========================================
+    -- PASO 2: VERIFICAR QUE NO HAYA MATCH ACTIVO
+    -- =========================================
+    IF EXISTS (
+        SELECT 1 FROM matches
+        WHERE reel_id = p_reel_id
+        AND status = 'seleccionado'
+    ) THEN
+        RAISE EXCEPTION 'Ya hay un match activo para este reel. Esperá a que responda o expire.';
+    END IF;
+    
+    -- =========================================
+    -- PASO 3: VERIFICAR QUE REALMENTE QUIERA COMPRAR
+    -- =========================================
+    IF NOT EXISTS (
+        SELECT 1 FROM lo_quiero
+        WHERE reel_id = p_reel_id AND user_id = p_comprador_id
+    ) THEN
+        RAISE EXCEPTION 'Este usuario no manifestó interés en comprar este producto';
+    END IF;
+    
+    -- =========================================
+    -- PASO 4: CREAR EL MATCH
+    -- =========================================
+    INSERT INTO matches (
+        reel_id,
+        vendedor_id,
+        comprador_id,
+        status,
+        expires_at
+    ) VALUES (
+        p_reel_id,
+        p_vendedor_id,
+        p_comprador_id,
+        'seleccionado',
+        NOW() + INTERVAL '12 hours'  -- ⏰ TIEMPO LÍMITE: 12 HORAS
+    ) RETURNING id INTO v_match_id;
+    
+    -- =========================================
+    -- PASO 5: ACTUALIZAR ESTADO EN LO QUIERO
+    -- =========================================
+    UPDATE lo_quiero
+    SET status = 'seleccionado'
+    WHERE reel_id = p_reel_id AND user_id = p_comprador_id;
+    
+    -- =========================================
+    -- PASO 6: NOTIFICAR AL COMPRADOR
+    -- =========================================
+    INSERT INTO notifications (user_id, type, data) VALUES (
+        p_comprador_id,
+        'te_seleccionaron',
+        jsonb_build_object(
+            'reel_id', p_reel_id,
+            'vendedor_id', p_vendedor_id,
+            'expires_at', NOW() + INTERVAL '12 hours'
+        )
+    );
+    
+    RETURN v_match_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =====================================================
+-- PARTE 13: RESPUESTA DEL COMPRADOR (ACEPTAR/RECHAZAR)
+-- =====================================================
+
+-- ✅❌ RESPONDER MATCH (EL COMPRADOR DECIDE)
+-- ¿Qué hace? El comprador acepta o rechaza la selección
+-- ¿Qué pasa si acepta?
+--   - +5 puntos para ambos
+--   - Se comparten datos (desde la app)
+--   - Reel pasa a 'completed' (vendido)
+-- ¿Qué pasa si rechaza?
+--   - Vendedor puede elegir otro
+--   - Sin penalización
+CREATE OR REPLACE FUNCTION responder_match(
+    p_match_id UUID,
+    p_comprador_id UUID,
+    p_respuesta TEXT  -- 'aceptar' o 'rechazar'
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_match RECORD;
+    v_reel RECORD;
+BEGIN
+    -- =========================================
+    -- PASO 1: OBTENER EL MATCH
+    -- =========================================
+    SELECT * INTO v_match FROM matches WHERE id = p_match_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Match no encontrado';
+    END IF;
+    
+    -- =========================================
+    -- PASO 2: VERIFICAR QUE SEA EL COMPRADOR
+    -- =========================================
+    IF v_match.comprador_id != p_comprador_id THEN
+        RAISE EXCEPTION 'No podés responder por otro usuario';
+    END IF;
+    
+    -- =========================================
+    -- PASO 3: VERIFICAR QUE EL MATCH ESTÉ ACTIVO
+    -- =========================================
+    IF v_match.status != 'seleccionado' THEN
+        RAISE EXCEPTION 'Este match ya no está activo';
+    END IF;
+    
+    -- =========================================
+    -- PASO 4: VERIFICAR QUE NO HAYA EXPIRADO
+    -- =========================================
+    IF v_match.expires_at < NOW() THEN
+        -- Marcar como expirado
+        UPDATE matches SET status = 'expirado' WHERE id = p_match_id;
+        
+        -- Penalizar al comprador (-1 punto)
+        UPDATE users SET 
+            puntos_compromiso = puntos_compromiso - 1,
+            sin_respuesta = sin_respuesta + 1
+        WHERE id = p_comprador_id;
+        
+        -- Reactivar el LO QUIERO (para que otro pueda comprar)
+        UPDATE lo_quiero
+        SET status = 'activo'
+        WHERE reel_id = v_match.reel_id AND user_id = p_comprador_id;
+        
+        RAISE EXCEPTION 'Se venció el tiempo para responder (12hs)';
+    END IF;
+    
+    -- =========================================
+    -- PASO 5: PROCESAR RESPUESTA
+    -- =========================================
+    IF p_respuesta = 'aceptar' THEN
+        -- ========== ACEPTÓ (QUIERE COMPRAR) ==========
+        
+        -- Completar match
+        UPDATE matches SET
+            status = 'aceptado',
+            responded_at = NOW(),
+            puntos_vendedor = 5,
+            puntos_comprador = 5
+        WHERE id = p_match_id;
+        
+        -- Dar +5 puntos a ambos
+        UPDATE users SET
+            puntos_compromiso = puntos_compromiso + 5,
+            respuestas_rapidas = respuestas_rapidas + 1
+        WHERE id IN (v_match.vendedor_id, v_match.comprador_id);
+        
+        -- Marcar reel como COMPLETADO (vendido)
+        UPDATE reels SET status = 'completed' 
+        WHERE id = v_match.reel_id;
+        
+        -- Disminuir contador de activos del vendedor
+        UPDATE users SET 
+            reels_activos = GREATEST(reels_activos - 1, 0)
+        WHERE id = v_match.vendedor_id;
+        
+        -- Obtener título del reel para la notificación
+        SELECT title INTO v_reel FROM reels WHERE id = v_match.reel_id;
+        
+        -- Notificar al vendedor
+        INSERT INTO notifications (user_id, type, data) VALUES (
+            v_match.vendedor_id,
+            'acepto_seleccion',
+            jsonb_build_object(
+                'match_id', p_match_id,
+                'reel_id', v_match.reel_id,
+                'comprador_id', p_comprador_id,
+                'reel_titulo', v_reel.title
+            )
+        );
+        
+    ELSIF p_respuesta = 'rechazar' THEN
+        -- ========== RECHAZÓ (YA NO QUIERE COMPRAR) ==========
+        
+        -- Marcar como rechazado
+        UPDATE matches SET
+            status = 'rechazado',
+            responded_at = NOW()
+        WHERE id = p_match_id;
+        
+        -- Reactivar LO QUIERO (para que otro pueda comprar)
+        UPDATE lo_quiero
+        SET status = 'activo'
+        WHERE reel_id = v_match.reel_id AND user_id = p_comprador_id;
+        
+        -- Notificar al vendedor
+        INSERT INTO notifications (user_id, type, data) VALUES (
+            v_match.vendedor_id,
+            'rechazo_seleccion',
+            jsonb_build_object(
+                'match_id', p_match_id,
+                'reel_id', v_match.reel_id,
+                'comprador_id', p_comprador_id
+            )
+        );
+    ELSE
+        RAISE EXCEPTION 'Respuesta inválida. Usá "aceptar" o "rechazar"';
+    END IF;
+    
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+⏸️ ¿Vas siguiendo?
+Lo que acabamos de ver:
+
+Función	¿Qué hace?	¿Por qué es clave?
+publicar_reel_con_boost	Crea un reel y actualiza contadores	Es la única forma de publicar
+seleccionar_comprador	Vendedor elige comprador	Inicia el match
+responder_match	Comprador acepta/rechaza	Corazón de la compra-venta
+Dato clave: Cuando el comprador ACEPTA:
+
+✅ +5 puntos para ambos
+
+✅ El reel pasa a completed (no aparece más en feed)
+
+✅ Se resta 1 de reels_activos del vendedor
+
+✅ Se notifica al vendedor
+
+¿Seguimos con las funciones de ranking y nivel? Faltan:
+
+calcular_nivel_usuario (cómo se sube de nivel)
+
+Triggers automáticos
+
+Funciones de mantenimiento (cron jobs)
+
+4. Query del feed - Cómo se muestran los reels
+sql
+-- =====================================================
+-- PARTE 14: CÁLCULO DE NIVEL (¡CÓMO SE SUBE!)
+-- =====================================================
+-- ⭐ CALCULAR NIVEL DEL USUARIO
+-- ¿Qué hace? Determina el nivel (1-8) según:
+--   - Puntos de compromiso (interacciones)
+--   - Días activos (hasta 30)
+--   - Verificaciones (email, WhatsApp, Facebook, externa)
+-- ¿Por qué es importante? El nivel determina:
+--   - Cuántos reels podés publicar
+--   - Cuántos LO QUIERO podés dar por día
+CREATE OR REPLACE FUNCTION calcular_nivel_usuario(p_user_id UUID)
+RETURNS INT AS $$
+DECLARE
+    v_puntos_compromiso INT;
+    v_dias_activos INT;
+    v_verificaciones INT;
+    v_nivel INT;
+BEGIN
+    -- =========================================
+    -- PASO 1: OBTENER DATOS DEL USUARIO
+    -- =========================================
+    SELECT 
+        COALESCE(puntos_compromiso, 0),
+        LEAST(COALESCE(dias_activos, 0), 30),  -- Máximo 30 días cuentan
+        CASE WHEN email_verificado THEN 1 ELSE 0 END +
+        CASE WHEN whatsapp_verificado THEN 1 ELSE 0 END +
+        CASE WHEN facebook_verificado_3 THEN 1 ELSE 0 END +
+        CASE WHEN verified THEN 1 ELSE 0 END
+    INTO v_puntos_compromiso, v_dias_activos, v_verificaciones
+    FROM users WHERE id = p_user_id;
+    
+    -- =========================================
+    -- PASO 2: FÓRMULA DE NIVEL
+    -- =========================================
+    -- Base 1 + (puntos/100) + (días × 0.3) + (verificaciones × 2)
+    -- Ejemplos:
+    --   Usuario nuevo: 1 + 0 + 0 + 0 = nivel 1
+    --   200 puntos + 10 días + 2 verificaciones: 
+    --     1 + 2 + 3 + 4 = nivel 10 → se limita a 8
+    v_nivel := 1 + FLOOR(
+        (v_puntos_compromiso / 100.0) +      -- Cada 100 puntos = +1 nivel
+        (v_dias_activos * 0.3) +              -- Cada ~3 días = +1 nivel
+        (v_verificaciones * 2.0)               -- Cada verificación = +2 niveles
+    );
+    
+    -- =========================================
+    -- PASO 3: LIMITAR A MÁXIMO 8
+    -- =========================================
+    IF v_nivel > 8 THEN
+        v_nivel := 8;
+    END IF;
+    
+    -- =========================================
+    -- PASO 4: ACTUALIZAR EL NIVEL
+    -- =========================================
+    UPDATE users SET level = v_nivel WHERE id = p_user_id;
+    
+    RETURN v_nivel;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =====================================================
+-- PARTE 15: TRIGGERS AUTOMÁTICOS (ACTUALIZAN RANKING)
+-- =====================================================
+
+-- 🎯 CALCULAR RANKING SCORE (FÓRMULA DEL FEED)
+-- ¿Qué hace? Calcula el puntaje de cada reel para ordenar el feed
+-- Fórmula: 
+--   Boost: 1000 (exponencial) o 500 (normal)
+--   + (lo_quiero × 5)  (cada intención de compra vale 5)
+--   + (likes × 1)       (cada like vale 1)
+--   + (shares × 3)      (cada compartido vale 3)
+--   - días desde creación (decay)
+CREATE OR REPLACE FUNCTION calculate_ranking_score()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Actualizar el ranking_score del reel afectado
+    UPDATE reels
+    SET ranking_score = 
+        CASE
+            WHEN boost_type = 'EXPONENCIAL' AND boost_expires_at > NOW() THEN 1000
+            WHEN boost_type = 'NORMAL' AND boost_expires_at > NOW() THEN 500
+            ELSE 0
+        END
+        + (lo_quiero_count * 5)
+        + (like_count * 1)
+        + (share_count * 3)
+        - EXTRACT(EPOCH FROM (NOW() - created_at))/86400  -- Resta 1 por día
+    WHERE id = COALESCE(NEW.reel_id, OLD.reel_id);
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =========================================
+-- TRIGGERS: Se ejecutan AUTOMÁTICAMENTE cuando pasa algo
+-- =========================================
+
+-- 🔄 Cuando alguien da LIKE
+CREATE TRIGGER update_ranking_on_like
+AFTER INSERT OR DELETE ON likes
+FOR EACH ROW
+EXECUTE FUNCTION calculate_ranking_score();
+
+-- 🔄 Cuando alguien da LO QUIERO
+CREATE TRIGGER update_ranking_on_lo_quiero
+AFTER INSERT OR DELETE ON lo_quiero
+FOR EACH ROW
+EXECUTE FUNCTION calculate_ranking_score();
+
+-- 🔄 Cuando alguien COMPARTE
+CREATE TRIGGER update_ranking_on_share
+AFTER UPDATE OF share_count ON reels
+FOR EACH ROW
+EXECUTE FUNCTION calculate_ranking_score();
+
+-- =====================================================
+-- PARTE 16: CRON JOBS (MANTENIMIENTO AUTOMÁTICO)
+-- =====================================================
+
+-- 🧹 MANTENIMIENTO DE RANKING (ejecutar cada hora)
+-- ¿Qué hace?
+--   1. Limpia boosts expirados
+--   2. Actualiza ranking de todos los reels activos
+CREATE OR REPLACE FUNCTION maintain_reels_ranking()
+RETURNS void AS $$
+BEGIN
+    -- 1. Limpiar boosts expirados
+    UPDATE reels
+    SET boost_type = NULL
+    WHERE boost_expires_at < NOW();
+    
+    -- 2. Actualizar ranking de reels activos
+    UPDATE reels
+    SET ranking_score = 
+        CASE
+            WHEN boost_type = 'EXPONENCIAL' AND boost_expires_at > NOW() THEN 1000
+            WHEN boost_type = 'NORMAL' AND boost_expires_at > NOW() THEN 500
+            ELSE 0
+        END
+        + (lo_quiero_count * 5)
+        + (like_count * 1)
+        + (share_count * 3)
+        - EXTRACT(EPOCH FROM (NOW() - created_at))/86400
+    WHERE status = 'active';
+END;
+$$ LANGUAGE plpgsql;
+
+-- ⏰ VERIFICAR MATCHES EXPIRADOS (ejecutar cada hora)
+-- ¿Qué hace? Busca matches que expiraron y aplica penalizaciones
+CREATE OR REPLACE FUNCTION check_expired_matches()
+RETURNS void AS $$
+DECLARE
+    v_match RECORD;
+BEGIN
+    FOR v_match IN
+        SELECT * FROM matches
+        WHERE status = 'seleccionado'
+        AND expires_at < NOW()
+    LOOP
+        -- Marcar como expirado
+        UPDATE matches SET status = 'expirado'
+        WHERE id = v_match.id;
+        
+        -- Penalizar al comprador (-1 punto)
+        UPDATE users SET
+            puntos_compromiso = puntos_compromiso - 1,
+            sin_respuesta = sin_respuesta + 1
+        WHERE id = v_match.comprador_id;
+        
+        -- Reactivar lo_quiero (para que otro pueda comprar)
+        UPDATE lo_quiero
+        SET status = 'activo'
+        WHERE reel_id = v_match.reel_id AND user_id = v_match.comprador_id;
+        
+        -- Notificar al vendedor que puede elegir otro
+        INSERT INTO notifications (user_id, type, data) VALUES (
+            v_match.vendedor_id,
+            'nuevo_interesado_disponible',
+            jsonb_build_object(
+                'reel_id', v_match.reel_id,
+                'match_expirado_id', v_match.id
+            )
+        );
+        
+        -- Notificar al comprador que perdió puntos
+        INSERT INTO notifications (user_id, type, data) VALUES (
+            v_match.comprador_id,
+            'sin_respuesta',
+            jsonb_build_object(
+                'match_id', v_match.id,
+                'reel_id', v_match.reel_id
+            )
+        );
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 📊 RESETEAR LÍMITES SEMANALES/MENSUALES (ejecutar diario)
+CREATE OR REPLACE FUNCTION reset_limites_semanales_mensuales()
+RETURNS void AS $$
+BEGIN
+    -- Reset semanal (los que cumplieron 7 días)
+    UPDATE users SET
+        reels_semana = 0,
+        semana_inicio = CURRENT_DATE
+    WHERE semana_inicio < CURRENT_DATE - INTERVAL '7 days';
+    
+    -- Reset mensual (los que cumplieron 30 días)
+    UPDATE users SET
+        reels_mes = 0,
+        mes_inicio = CURRENT_DATE
+    WHERE mes_inicio < CURRENT_DATE - INTERVAL '30 days';
+END;
+$$ LANGUAGE plpgsql;
+
+-- =====================================================
+-- PARTE 17: QUERY DEL FEED (¡CÓMO SE MUESTRAN LOS REELS!)
+-- =====================================================
+
+-- 🎬 QUERY FINAL DEL FEED
+-- ¿Qué hace? Trae los reels para mostrar en el feed
+-- Orden: 
+--   1. Por ranking_score (precalculado)
+--   2. + un poco de aleatoriedad (10%) para no repetir
+-- Filtros:
+--   - Solo reels activos
+--   - De la localidad del usuario, su provincia, o globales
+SELECT 
+    id,
+    user_id,
+    video_url,
+    thumbnail_url,      -- ¡CRÍTICO! Para carga instantánea
+    title,
+    description,
+    price,
+    condition,           -- NUEVO/USADO
+    categories,
+    province,
+    locality,
+    shipping_methods,    -- Chips de envío
+    payment_methods,     -- Chips de pago
+    like_count,
+    lo_quiero_count,
+    share_count,
+    view_count,
+    boost_type,
+    status,
+    created_at
+FROM reels
+WHERE status = 'active'  -- NUNCA mostrar 'completed' ni 'shadow_banned'
+AND (
+    locality = :localidad_usuario    -- Primero los de mi localidad
+    OR province = :provincia_usuario -- Después los de mi provincia
+    OR 1=1                            -- Después el resto de Argentina
+)
+ORDER BY
+    ranking_score + (random() * 0.1) DESC  -- Ranking + 10% de azar
+LIMIT 20;
+✅ ¡YA ESTÁ TODO!
+Resumen de TODO el sistema:
+Parte	¿Qué hace?
+Tablas (1-8)	Guardan los datos (users, reels, likes, etc)
+Funciones de control (9-10)	Registran acceso, verifican límites
+Publicación (11)	Crea reels con boost
+Match (12-13)	Sistema de compra-venta
+Nivel (14)	Calcula nivel del usuario
+Triggers (15)	Actualizan ranking automáticamente
+Cron jobs (16)	Mantenimiento automático
+Feed (17)	Query que muestra los reels
+🚀 LO QUE TENÉS AHORA
+✅ Sistema completo de:
+Usuarios con niveles y reputación
+
+Reels con geolocalización
+
+Likes (solo para ranking)
+
+LO QUIERO (intención real de compra)
+
+Matches (selección + timer 12hs)
+
+Notificaciones (solo para LO QUIERO)
+
+Puntos de boost (ganar + gastar)
+
+Límites por nivel (anti-spam)
+
+Denuncias y shadow ban
+
+Ranking automático
+
+Feed optimizado
+
+📊 Ejemplo de flujo COMPLETO:
+text
+1. Usuario abre app → registrar_acceso_diario() → +5 puntos
+2. Ve un reel que le gusta → da LO QUIERO
+3. Vendedor recibe notificación → entra a RECIBIDOS
+4. Vendedor selecciona comprador → seleccionar_comprador()
+5. Comprador recibe notificación → tiene 12hs
+6. Comprador ACEPTA → responder_match('aceptar')
+   → +5 puntos a ambos
+   → reel pasa a 'completed'
+   → se comparten datos
+7. Vendedor ya no puede vender ese reel (status = 'completed')
+📝 ÚLTIMA RECOMENDACIÓN
+Antes de ejecutar, verificá:
+
+Ejecutá en orden: Todo este SQL está en orden secuencial
+
+Probá con un usuario: Creá un usuario y probá cada función
+
+Monitoreá errores: Los primeros días revisá los logs
+
+¿Necesitás algo más? ¿Querés que te genere:
+
+Datos de prueba (inserts)?
+
+Consultas de monitoreo?
+
+Backup de seguridad?

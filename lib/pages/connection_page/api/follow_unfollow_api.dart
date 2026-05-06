@@ -1,0 +1,3 @@
+﻿class FollowUnfollowApi {
+  // Placeholder
+}

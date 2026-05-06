@@ -1,0 +1,154 @@
+name: opole
+description: "Short video social app - Supabase First Architecture"
+publish_to: 'none'
+
+version: 1.0.0+2
+
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ===================================================================
+  # ✅ ESTADO, NAVEGACIÓN Y UTILIDADES CORE
+  # ===================================================================
+  get: ^4.6.6                          # Estado y navegación (GetX)
+  get_storage: ^2.1.1                  # Cache local para preferencias del feed
+  collection: ^1.18.0                  # Utils: firstWhereOrNull, LinkedHashMap, etc.
+  async: ^2.11.0  # ✅ Para CancelableOperation en VideoPreloadManager
+  badges: ^3.1.2  # ← AGREGAR ESTA LÍNEA
+
+  # ===================================================================
+  # ✅ CONECTIVIDAD Y RED
+  # ===================================================================
+  connectivity_plus: ^6.0.3           # Detectar cambios de red
+  http: ^0.13.5                        # HTTP client para APIs externas
+  dio: ^5.4.3+1                        # HTTP avanzado con interceptores
+
+  # ===================================================================
+  # ✅ SUPABASE (BACKEND PRINCIPAL)
+  # ===================================================================
+  supabase_flutter: ^2.8.0            # Cliente oficial de Supabase
+  flutter_dotenv: ^5.1.0              # Variables de entorno (.env)
+
+  # ===================================================================
+  # ✅ FIREBASE (SOLO NOTIFICACIONES PUSH - SIN AUTH)
+  # ===================================================================
+  firebase_core: ^3.8.0               # Requerido para FCM
+  equatable: ^2.0.5
+  firebase_messaging: ^15.2.10        # Notificaciones push
+  google_sign_in: ^6.2.1              # Login con Google (opcional)
+
+  # ===================================================================
+  # ✅ VIDEO Y CÁMARA - CORE DEL FEED INMERSIVO 🎬
+  # ===================================================================
+  video_player: ^2.9.2                # Reproducción de video nativa
+  chewie: ^1.8.4                      # UI opcional para video (si se necesita)
+  camera: ^0.10.5+9                   # Grabación de reels
+  image_picker: ^1.1.1                # Selección de imágenes/video
+  video_thumbnail: ^0.5.3             # Generar thumbnails de videos
+
+  # ===================================================================
+  # ✅ IMÁGENES, CACHE Y OPTIMIZACIÓN
+  # ===================================================================
+  cached_network_image: ^3.3.1        # ✅ Cache de imágenes de red (AVATARES)
+  flutter_cache_manager: ^3.3.1       # Gestión de cache general
+  flutter_image_compress: ^2.1.0      # Compresión de uploads (wishlist/avatars)
+
+  # ===================================================================
+  # ✅ UI COMPONENTS Y ANIMACIONES
+  # ===================================================================
+  dotted_border: ^2.1.0               # Bordes punteados para uploads
+  confetti: ^0.7.0                    # Efecto de explosion con confeti xD
+  shimmer: ^3.0.0                     # Efecto loading skeleton
+  lottie: ^2.7.0                      # Animaciones Lottie (onboarding, success)
+  readmore: ^3.0.0                    # Textos expansibles ("Leer más")
+  flutter_spinkit: ^5.2.1             # Spinners de carga
+  blurrycontainer: ^2.1.0             # Efectos blur para overlays
+
+  # ===================================================================
+  # ✅ UTILIDADES DEL SISTEMA
+  # ===================================================================
+  permission_handler: ^11.3.1         # Permisos (cámara, almacenamiento, etc.)
+  share_plus: ^12.0.1                 # Compartir reels/productos
+  intl: ^0.19.0                       # Internacionalización y formatos
+  url_launcher: ^6.3.0                # Abrir links externos
+  path_provider: ^2.1.3               # Acceder a rutas de almacenamiento
+  device_info_plus: ^10.1.0           # Info del dispositivo para analytics
+  visibility_detector: ^0.4.0+2
+
+  # ===================================================================
+  # ✅ NOTIFICACIONES LOCALES
+  # ===================================================================
+  flutter_local_notifications: ^17.0.0 # Notificaciones locales (backup FCM)
+
+  # ===================================================================
+  # ✅ CLOUDINARY (CDN PARA VIDEOS/IMÁGENES)
+  # ===================================================================
+  cloudinary_public: ^0.23.0          # Uploads a Cloudinary con transformaciones
+
+  # ===================================================================
+  # ✅ EXTRAS DE UI Y FUNCIONALIDAD
+  # ===================================================================
+  flutter_svg: ^2.0.9                 # Soporte para íconos SVG
+  qr_flutter: ^4.1.0                  # Generar QR para perfiles/productos
+  mobile_scanner: ^5.1.1              # Escanear QR codes
+  intl_phone_field: ^3.2.0            # Input de teléfono con código de país
+  flutter_otp_text_field: ^1.2.0      # Input de código de verificación
+  screenshot: ^3.0.0                  # Capturar pantalla (compartir reels)
+  date_picker_plus: ^4.0.0            # Date pickers personalizados
+  webview_flutter: ^4.4.4             # WebView para términos/políticas
+  preload_page_view: ^0.2.0           # PageView con precarga (opcional)
+  crypto: ^3.0.3                      # Hashing para tokens/IDs seguros
+
+  # ===================================================================
+  # ✅ OPCIONALES PARA PRODUCCIÓN (Descomentar si se necesitan)
+  # ===================================================================
+  # firebase_analytics: ^11.3.3       # Analytics de uso (opcional)
+  # firebase_crashlytics: ^4.1.3      # Reporte de crashes (opcional)
+  # sentry_flutter: ^7.10.1           # Monitoreo de errores alternativo
+  # logger: ^2.0.2+1                  # Logs estructurados en dev (Get.log es suficiente)
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0               # Reglas de linting recomendadas
+  flutter_launcher_icons: ^0.13.1     # Generar íconos de launcher automáticamente
+
+# ===================================================================
+# 🔹 CONFIGURACIÓN DE ÍCONOS DE LA APP
+# ===================================================================
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icons/ic_app_logo.webp"
+  min_sdk_android: 21
+  remove_alpha_ios: true              # ✅ Evitar problemas con transparencia en iOS
+
+# ===================================================================
+# 🔹 ASSETS Y FUENTES
+# ===================================================================
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/
+    - assets/fonts/
+    - assets/icons/
+    - assets/images/    
+    - assets/lottie/
+    - assets/effects/
+    - .env                            # Variables de entorno (Supabase, Cloudinary, etc.)
+    
+  fonts:
+    - family: SfProRegular
+      fonts:
+        - asset: assets/fonts/Sf-Pro-Regular.OTF
+    - family: SfProMedium
+      fonts:
+        - asset: assets/fonts/Sf-Pro-Medium.OTF
+    - family: SuproBold
+      fonts:
+        - asset: assets/fonts/Sf-Pro-Bold.OTF

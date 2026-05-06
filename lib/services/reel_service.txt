@@ -1,0 +1,14 @@
+import 'package:opole/core/services/supabase_client.dart' as local;
+
+class ReelService {
+  Future<Map<String, dynamic>?> getReelById(String reelId) async {
+    // Por ahora retorna datos dummy
+    return {
+      'userName': 'Usuario',
+      'ownerPhone': '+1234567890',
+      'ownerEmail': 'usuario@ejemplo.com',
+      'ownerWhatsapp': 'https://wa.me/1234567890',
+      'contactSharedWith': null, // Simula que no tiene acceso aún
+    };
+  }
+}

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+  <!-- ✅ Base config: HTTPS estricto + certificados del sistema -->
+  <base-config cleartextTrafficPermitted="false">
+    <trust-anchors>
+      <certificates src="system" />
+    </trust-anchors>
+  </base-config>
+
+  <!-- ✅ Supabase: Configuración explícita para evitar handshake errors -->
+  <domain-config>
+    <domain includeSubdomains="true">ihvbmppztoqkntifwvfa.supabase.co</domain>
+    <min-sdk-version value="21" />
+    <trust-anchors>
+      <certificates src="system" />
+    </trust-anchors>
+  </domain-config>
+
+  <!-- ✅ Cloudinary: Para videos/thumbnails -->
+  <domain-config cleartextTrafficPermitted="false">
+    <domain includeSubdomains="true">res.cloudinary.com</domain>
+  </domain-config>
+</network-security-config>
